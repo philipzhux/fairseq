@@ -806,10 +806,7 @@ class Trainer(object):
             except Exception as e: print("[Warning] Repeated hook register: ",e)    
             
 
-        metrics.log_start_time("train_wall", priority=800, round=0)
-        # metrics.log_start_time("train_timing", priority=400, round=0)
-        # self._count+=1
-        # self._starter.record()
+        
         # If EMA is enabled through store_ema=True
         # and task.uses_ema is True, pass the EMA model as a keyword
         # argument to the task.
@@ -819,7 +816,6 @@ class Trainer(object):
 
         # forward and backward pass
         logging_outputs, sample_size, ooms = [], 0, 0
-        # metrics.log_start_time("forwback", priority=400, round=0)
         for i, sample in enumerate(samples):  # delayed update loop
             sample, is_dummy_batch = self._prepare_sample(sample)
 
@@ -895,7 +891,6 @@ class Trainer(object):
                 # To handle gradient accumulation use case, we explicitly
                 # mark step here for every forward pass without a backward pass
                 self._xla_markstep_and_send_to_cpu()
-        # metrics.log_stop_time("forwback", weight = 1,prehook = torch.cuda.synchronize)
         if is_dummy_batch:
             if torch.is_tensor(sample_size):
                 sample_size.zero_()
@@ -1031,7 +1026,6 @@ class Trainer(object):
             )
 
         logging_output = None
-        # metrics.log_start_time("update", priority=400, round=0)
         if not overflow or self.cfg.distributed_training.ddp_backend == "slowmo":
             self.set_num_updates(self.get_num_updates() + 1)
 

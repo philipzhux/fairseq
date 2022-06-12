@@ -187,7 +187,7 @@ class TransformerEncoderLayerBase(nn.Module):
         # Note that we cannot use -inf here, because at some edge cases,
         # the attention weight (before softmax) for some padded element in query
         # will become -inf, which results in NaN in model parameters
-        # metrics.log_start_time("forward", priority=400, round=0)
+
         if attn_mask is not None:
             attn_mask = attn_mask.masked_fill(
                 attn_mask.to(torch.bool), -1e8 if x.dtype == torch.float32 else -1e4
@@ -222,7 +222,6 @@ class TransformerEncoderLayerBase(nn.Module):
         x = self.residual_connection(x, residual)
         if not self.normalize_before:
             x = self.final_layer_norm(x)
-        # metrics.log_stop_time("forward", weight = 1,prehook = torch.cuda.synchronize)
         if self.return_fc and not torch.jit.is_scripting():
             return x, fc_result
         return x
