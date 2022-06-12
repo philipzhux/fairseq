@@ -1073,6 +1073,10 @@ class InteractiveConfig(FairseqDataclass):
         metadata={"help": "file to read from; use - for stdin"},
     )
 
+@dataclass
+class ActNNConfig(FairseqDataclass):
+    model : str = field(default="invalid")
+    alg : Optional[str] = field(default=None)
 
 @dataclass
 class EMAConfig(FairseqDataclass):
@@ -1122,3 +1126,4 @@ class FairseqConfig(FairseqDataclass):
     bpe: Any = None
     tokenizer: Any = None
     ema: EMAConfig = EMAConfig()
+    atcnn: ActNNConfig = ActNNConfig()

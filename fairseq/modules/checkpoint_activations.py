@@ -9,6 +9,7 @@ from typing import Any, Dict, List, Tuple, Union
 import torch
 import torch.utils.checkpoint as checkpoint
 from fairseq import utils
+from fairseq.logging import meters, metrics
 
 
 def checkpoint_wrapper(m, offload_to_cpu=False):
@@ -154,11 +155,14 @@ class CheckpointFunction(torch.autograd.Function):
     """
 
     @staticmethod
+    @metrics.aggregate("checkpoint")
     def forward(ctx, run_function, parent_ctx_dict, kwarg_keys, *args):
+        metrics.log_start_time("forward", priority=400, round=0)
         if torch.is_grad_enabled():  # grad may be disabled, e.g., during validation
             checkpoint.check_backward_validity(args)
 
         ctx.run_function = run_function
+        # print(run_function)
         ctx.kwarg_keys = kwarg_keys
         ctx.fwd_rng_state = utils.get_rng_state()
 
@@ -179,7 +183,7 @@ class CheckpointFunction(torch.autograd.Function):
         with torch.no_grad():
             unpacked_args, unpacked_kwargs = unpack_kwargs(kwarg_keys, args)
             outputs = run_function(*unpacked_args, **unpacked_kwargs)
-
+        metrics.log_stop_time("forward", weight = 1,prehook = torch.cuda.synchronize)
         if isinstance(outputs, torch.Tensor):
             return outputs
         else:
@@ -189,9 +193,10 @@ class CheckpointFunction(torch.autograd.Function):
             outputs, packed_non_tensor_outputs = split_non_tensors(outputs)
             parent_ctx_dict["packed_non_tensor_outputs"] = packed_non_tensor_outputs
             return outputs
-
     @staticmethod
+    @metrics.aggregate("checkpoint")
     def backward(ctx, *args):
+        metrics.log_start_time("backward", priority=400, round=0)
         if not torch.autograd._is_checkpoint_valid():
             raise RuntimeError(
                 "Checkpointing is not compatible with .grad(), please use .backward() if possible"
@@ -239,4 +244,5 @@ class CheckpointFunction(torch.autograd.Function):
         grads = tuple(
             inp.grad if isinstance(inp, torch.Tensor) else None for inp in inputs
         )
+        metrics.log_stop_time("backward", weight = 1,prehook = torch.cuda.synchronize)
         return (None, None, None) + grads

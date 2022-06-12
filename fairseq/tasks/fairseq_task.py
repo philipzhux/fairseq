@@ -8,7 +8,7 @@ import os
 import warnings
 from argparse import Namespace
 from typing import Any, Callable, Dict, List
-
+from fairseq.logging import meters, metrics
 import torch
 from fairseq import metrics, search, tokenizer, utils
 from fairseq.data import Dictionary, FairseqDataset, data_utils, encoders, iterators
@@ -481,7 +481,7 @@ class FairseqTask(object):
             search_strategy=search_strategy,
             **extra_gen_cls_kwargs,
         )
-
+    @metrics.aggregate("generic_train")
     def train_step(
         self, sample, model, criterion, optimizer, update_num, ignore_grad=False
     ):
@@ -508,12 +508,16 @@ class FairseqTask(object):
         model.train()
         model.set_num_updates(update_num)
         with torch.autograd.profiler.record_function("forward"):
+            # metrics.log_start_time("forward", priority=400, round=0)
             with torch.cuda.amp.autocast(enabled=(isinstance(optimizer, AMPOptimizer))):
                 loss, sample_size, logging_output = criterion(model, sample)
+            # metrics.log_stop_time("forward", weight = 1,prehook = torch.cuda.synchronize)
         if ignore_grad:
             loss *= 0
         with torch.autograd.profiler.record_function("backward"):
+            # metrics.log_start_time("backward", priority=400, round=0)
             optimizer.backward(loss)
+            # metrics.log_stop_time("backward", weight = 1,prehook = torch.cuda.synchronize)
         return loss, sample_size, logging_output
 
     def valid_step(self, sample, model, criterion):

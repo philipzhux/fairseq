@@ -16,6 +16,8 @@ from argparse import Namespace
 from itertools import chain
 from typing import Any, Dict, List
 
+from click import pass_obj
+
 import torch
 from omegaconf import OmegaConf
 
@@ -29,6 +31,8 @@ from fairseq.models.ema import build_ema
 from fairseq.nan_detector import NanDetector
 from fairseq.optim import lr_scheduler
 from fairseq.utils import safe_hasattr
+import actnn
+import numpy as np
 
 logger = logging.getLogger(__name__)
 
@@ -171,6 +175,9 @@ class Trainer(object):
         self._start_time = time.time()
         self._previous_training_time = 0
         self._cumulative_training_time = None
+        self._count = 0
+        # self._timings = np.zeros((10,1))
+        # self._starter, self._ender = torch.cuda.Event(enable_timing=True), torch.cuda.Event(enable_timing=True)
 
     def reinitialize(self):
         """Reinitialize the Trainer, typically after model params change."""
@@ -774,6 +781,7 @@ class Trainer(object):
 
     def reset_dummy_batch(self, batch):
         self._dummy_batch = batch
+    
 
     @metrics.aggregate("train")
     def train_step(self, samples, raise_oom=False):
@@ -782,9 +790,26 @@ class Trainer(object):
         self.model.train()
         self.criterion.train()
         self.zero_grad()
+        if self.cfg.actnn.alg in ["L1", "swap"]:
+            print("===========Register ActNN===========")
+            actnn.set_optimization_level(self.cfg.actnn.alg)
+            controller = actnn.controller.Controller(self.model)
+
+            def pack_hook(input):
+                return controller.quantize(input)
+
+            def unpack_hook(input):
+                return controller.dequantize(input)
+            try:
+                torch._C._autograd._register_saved_tensors_default_hooks(
+                    pack_hook, unpack_hook)
+            except Exception as e: print("[Warning] Repeated hook register: ",e)    
+            
 
         metrics.log_start_time("train_wall", priority=800, round=0)
-
+        # metrics.log_start_time("train_timing", priority=400, round=0)
+        # self._count+=1
+        # self._starter.record()
         # If EMA is enabled through store_ema=True
         # and task.uses_ema is True, pass the EMA model as a keyword
         # argument to the task.
@@ -794,6 +819,7 @@ class Trainer(object):
 
         # forward and backward pass
         logging_outputs, sample_size, ooms = [], 0, 0
+        # metrics.log_start_time("forwback", priority=400, round=0)
         for i, sample in enumerate(samples):  # delayed update loop
             sample, is_dummy_batch = self._prepare_sample(sample)
 
@@ -850,6 +876,7 @@ class Trainer(object):
                     self.zero_grad()
                     if self.cuda:
                         torch.cuda.empty_cache()
+                    exit(-1)
                     if self.cfg.distributed_training.distributed_world_size == 1:
                         return None
                 else:
@@ -868,7 +895,7 @@ class Trainer(object):
                 # To handle gradient accumulation use case, we explicitly
                 # mark step here for every forward pass without a backward pass
                 self._xla_markstep_and_send_to_cpu()
-
+        # metrics.log_stop_time("forwback", weight = 1,prehook = torch.cuda.synchronize)
         if is_dummy_batch:
             if torch.is_tensor(sample_size):
                 sample_size.zero_()
@@ -1004,6 +1031,7 @@ class Trainer(object):
             )
 
         logging_output = None
+        # metrics.log_start_time("update", priority=400, round=0)
         if not overflow or self.cfg.distributed_training.ddp_backend == "slowmo":
             self.set_num_updates(self.get_num_updates() + 1)
 
@@ -1056,10 +1084,14 @@ class Trainer(object):
                 if self.cuda and self.cuda_env is not None:
                     # log minimum free memory over the iteration
                     gb_used = torch.cuda.max_memory_allocated() / 1024 / 1024 / 1024
+                    pm = torch.cuda.max_memory_allocated()
                     torch.cuda.reset_peak_memory_stats()
                     gb_free = self.cuda_env.total_memory_in_GB - gb_used
                     metrics.log_scalar(
                         "gb_free", gb_free, priority=1500, round=1, weight=0
+                    )
+                    metrics.log_scalar(
+                        "peak_mem", pm, priority=1500, round=1, weight=0
                     )
 
                 # log stats
@@ -1091,7 +1123,6 @@ class Trainer(object):
                 round=4,
                 weight=0,
             )
-
         metrics.log_stop_time("train_wall")
         return logging_output
 

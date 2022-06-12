@@ -12,8 +12,10 @@ import logging
 import math
 import os
 import sys
+import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
-
+import actnn
+from actnn.utils import get_memory_usage, compute_tensor_bytes, exp_recorder
 # We need to setup root logger before importing any fairseq libraries.
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -203,6 +205,7 @@ def main(cfg: FairseqConfig) -> None:
         )
     train_meter.stop()
     logger.info("done training in {:.1f} seconds".format(train_meter.sum))
+    exp_recorder.dump('results/new_results.json')
 
     # ioPath implementation to wait for all asynchronous file writes to complete.
     if cfg.checkpoint.write_checkpoints_asynchronously:
@@ -309,6 +312,7 @@ def train(
     should_stop = False
     num_updates = trainer.get_num_updates()
     logger.info("Start iterating over samples")
+    total_iter_num = len(progress)
     for i, samples in enumerate(progress):
         with metrics.aggregate("train_inner"), torch.autograd.profiler.record_function(
             "train_step-%d" % i
@@ -325,20 +329,31 @@ def train(
                 # reset mid-epoch stats after each log interval
                 # the end-of-epoch stats will still be preserved
                 metrics.reset_meters("train_inner")
-
         end_of_epoch = not itr.has_next()
         valid_losses, should_stop = validate_and_save(
             cfg, trainer, task, epoch_itr, valid_subsets, end_of_epoch
         )
-
+        if i>=cfg.actnn.exp-1: should_stop = True
         if should_stop:
             break
+    
 
     # log end-of-epoch stats
     logger.info("end of epoch {} (average epoch stats below)".format(epoch_itr.epoch))
     stats = get_training_stats(metrics.get_smoothed_values("train"))
     progress.print(stats, tag="train", step=num_updates)
-
+    bz_exp = cfg.dataset.max_tokens//cfg.model.tokens_per_sample
+    # bz = metrics.get_smoothed_value("train","bsz")
+    wps = metrics.get_smoothed_value("train","wps")
+    pm = metrics.get_smoothed_value("train","peak_mem")
+    ips = wps/cfg.model.tokens_per_sample
+    exp_recorder.record("network", cfg.actnn.arch)
+    exp_recorder.record("alg", cfg.actnn.alg)
+    exp_recorder.record("batch_size", bz_exp)
+    exp_recorder.record("batch_time", bz_exp/ips)
+    exp_recorder.record("ips", ips)
+    exp_recorder.record("peak_mem",pm)
+    exp_recorder.record("tstamp", time.time(), 2)
     # reset epoch-level meters
     metrics.reset_meters("train")
     return valid_losses, should_stop

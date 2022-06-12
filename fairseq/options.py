@@ -7,10 +7,13 @@ import argparse
 from pathlib import Path
 from typing import Callable, List, Optional, Union
 
+from pkg_resources import parse_requirements
+
 import torch
 from fairseq import utils
 from fairseq.data.indexed_dataset import get_available_dataset_impl
 from fairseq.dataclass.configs import (
+    ActNNConfig,
     CheckpointConfig,
     CommonConfig,
     CommonEvalConfig,
@@ -42,6 +45,7 @@ def get_training_parser(default_task="translation"):
     add_optimization_args(parser)
     add_checkpoint_args(parser)
     add_ema_args(parser)
+    add_actnn_args(parser)
     return parser
 
 
@@ -401,7 +405,7 @@ def get_args(
 ):
     parser = get_training_parser(task)
     args = parse_args_and_arch(parser, [str(data), "--task", task, "--arch", arch])
-
+    
     for k, v in overrides.items():
         setattr(args, k, v)
 
@@ -411,3 +415,9 @@ def get_args(
 def add_ema_args(parser):
     group = parser.add_argument_group("EMA configuration")
     gen_parser_from_dataclass(group, EMAConfig())
+
+def add_actnn_args(parser):
+    group =  parser.add_argument_group("ActNN configuration")
+    group.add_argument('--alg', default=None, type=str)
+    group.add_argument('--exp', default=None, type=int)
+    gen_parser_from_dataclass(group, ActNNConfig())
