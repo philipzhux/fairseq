@@ -205,7 +205,8 @@ def main(cfg: FairseqConfig) -> None:
         )
     train_meter.stop()
     logger.info("done training in {:.1f} seconds".format(train_meter.sum))
-    exp_recorder.dump('results/new_results.json')
+    if cfg.distributed_training.distributed_world_size==1 or cfg.distributed_training.distributed_rank==0:
+        exp_recorder.dump('results/new_results.json')
 
     # ioPath implementation to wait for all asynchronous file writes to complete.
     if cfg.checkpoint.write_checkpoints_asynchronously:
@@ -345,7 +346,7 @@ def train(
     bz_exp = cfg.dataset.max_tokens//cfg.model.tokens_per_sample
     # bz = metrics.get_smoothed_value("train","bsz")
     wps = metrics.get_smoothed_value("train","wps")
-    pm = metrics.get_smoothed_value("train","peak_mem")
+    pm = metrics.get_smoothed_value("train","peak_mem")*cfg.distributed_training.distributed_world_size
     ips = wps/cfg.model.tokens_per_sample
     exp_recorder.record("network", cfg.actnn.arch)
     exp_recorder.record("alg", cfg.actnn.alg)
