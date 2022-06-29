@@ -16,6 +16,7 @@ import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
 import actnn
 from actnn.utils import get_memory_usage, compute_tensor_bytes, exp_recorder
+from multiprocessing import Process, Value
 # We need to setup root logger before importing any fairseq libraries.
 logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(name)s | %(message)s",
@@ -178,6 +179,10 @@ def main(cfg: FairseqConfig) -> None:
     lr = trainer.get_lr()
 
     train_meter = meters.StopwatchMeter()
+    run_flag = Value('b',1)
+    cfg.profile_flag = Value('b', 0)
+    p = Process(target=log_utlization, args=(run_flag, cfg.profile_flag))
+    p.start()
     train_meter.start()
     while epoch_itr.next_epoch_idx <= max_epoch:
         if lr <= cfg.optimization.stop_min_lr:
@@ -204,6 +209,8 @@ def main(cfg: FairseqConfig) -> None:
             disable_iterator_cache=task.has_sharded_data("train"),
         )
     train_meter.stop()
+    run_flag.value = 0
+    p.join()
     logger.info("done training in {:.1f} seconds".format(train_meter.sum))
     if cfg.distributed_training.distributed_world_size==1 or cfg.distributed_training.distributed_rank==0:
         exp_recorder.dump('results/new_results.json')
@@ -216,6 +223,16 @@ def main(cfg: FairseqConfig) -> None:
         )
         PathManager.async_close()
         logger.info("ioPath PathManager finished waiting.")
+
+def log_utlization(run_flag,prof_flag):
+    start_time = time.time()
+    with open("utilization.log","a") as log_f:
+        while run_flag.value:
+            while prof_flag.value:
+                log_f.write("%f:%d%\n"%(time.time()-start_time,torch.cuda.utilization()))
+                time.sleep(0.5)
+            #log_f.write("\n")
+
 
 
 def should_stop_early(cfg: DictConfig, valid_loss: float) -> bool:
@@ -318,8 +335,10 @@ def train(
         with metrics.aggregate("train_inner"), torch.autograd.profiler.record_function(
             "train_step-%d" % i
         ):
+            cfg.profile_flag.value = 1
             log_output = trainer.train_step(samples)
-
+            cfg.profile_flag.value = 0
+        
         if log_output is not None:  # not OOM, overflow, ...
             # log mid-epoch stats
             num_updates = trainer.get_num_updates()
@@ -340,12 +359,12 @@ def train(
     
 
     # log end-of-epoch stats
+    wps = metrics.get_meter("train","wps").avg
     logger.info("end of epoch {} (average epoch stats below)".format(epoch_itr.epoch))
     stats = get_training_stats(metrics.get_smoothed_values("train"))
     progress.print(stats, tag="train", step=num_updates)
     bz_exp = cfg.dataset.max_tokens//cfg.model.tokens_per_sample
     # bz = metrics.get_smoothed_value("train","bsz")
-    wps = metrics.get_smoothed_value("train","wps")
     pm = metrics.get_smoothed_value("train","peak_mem")*cfg.distributed_training.distributed_world_size
     ips = wps/cfg.model.tokens_per_sample
     exp_recorder.record("network", cfg.actnn.arch)
