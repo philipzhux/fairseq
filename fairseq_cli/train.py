@@ -179,10 +179,10 @@ def main(cfg: FairseqConfig) -> None:
     lr = trainer.get_lr()
 
     train_meter = meters.StopwatchMeter()
-    run_flag = Value('b',1)
-    cfg.profile_flag = Value('b', 0)
-    p = Process(target=log_utlization, args=(run_flag, cfg.profile_flag))
-    p.start()
+    if cfg.actnn.ut: 
+        run_flag,profile_flag = Value('b',1),Value('b', 0)
+        p = Process(target=log_utlization, args=(run_flag, profile_flag,cfg.actnn.utpath))
+    else: run_flag,profile_flag = None, None
     train_meter.start()
     while epoch_itr.next_epoch_idx <= max_epoch:
         if lr <= cfg.optimization.stop_min_lr:
@@ -194,10 +194,14 @@ def main(cfg: FairseqConfig) -> None:
             break
 
         # train for one epoch
-        valid_losses, should_stop = train(cfg, trainer, task, epoch_itr)
+        if cfg.actnn.ut: p.start()
+        valid_losses, should_stop = train(cfg, trainer, task, epoch_itr,profile_flag)
+        if cfg.actnn.ut: 
+            run_flag.value = 0
+            p.join()
         if should_stop:
             break
-
+        
         # only use first validation loss to update the learning rate
         lr = trainer.lr_step(epoch_itr.epoch, valid_losses[0])
 
@@ -209,8 +213,7 @@ def main(cfg: FairseqConfig) -> None:
             disable_iterator_cache=task.has_sharded_data("train"),
         )
     train_meter.stop()
-    run_flag.value = 0
-    p.join()
+
     logger.info("done training in {:.1f} seconds".format(train_meter.sum))
     if cfg.distributed_training.distributed_world_size==1 or cfg.distributed_training.distributed_rank==0:
         exp_recorder.dump('results/new_results.json')
@@ -224,16 +227,26 @@ def main(cfg: FairseqConfig) -> None:
         PathManager.async_close()
         logger.info("ioPath PathManager finished waiting.")
 
-def log_utlization(run_flag,prof_flag):
+def log_utlization(run_flag,prof_flag,ut_path):
     start_time = time.time()
-    with open("utilization.log","a") as log_f:
-        while run_flag.value:
-            while prof_flag.value:
-                log_f.write("%f:%d%\n"%(time.time()-start_time,torch.cuda.utilization()))
-                time.sleep(0.5)
-            #log_f.write("\n")
+    with open(ut_path,"a") as log_f:
+        while run_flag.value==1:
+            if prof_flag.value==1:
+                log_f.write("%f:%d\n"%(time.time()-start_time,get_gpu_util()[0]))
+                #print("%f:%d%\n"%(time.time()-start_time,torch.cuda.utilization()))
+            time.sleep(0.5)
 
-
+import subprocess as sp
+def get_gpu_util():
+    output_to_list = lambda x: x.decode('ascii').split('\n')[:-1]
+    ACCEPTABLE_AVAILABLE_MEMORY = 1024
+    COMMAND = "nvidia-smi --query-gpu=utilization.gpu --format=csv"
+    try:
+        util_info = output_to_list(sp.check_output(COMMAND.split(),stderr=sp.STDOUT))[1:]
+    except sp.CalledProcessError as e:
+        raise RuntimeError("command '{}' return with error (code {}): {}".format(e.cmd, e.returncode, e.output))
+    util_values = [int(x.split()[0]) for i, x in enumerate(util_info)]
+    return util_values
 
 def should_stop_early(cfg: DictConfig, valid_loss: float) -> bool:
     # skip check if no validation was done in the current epoch
@@ -265,7 +278,7 @@ def should_stop_early(cfg: DictConfig, valid_loss: float) -> bool:
 
 @metrics.aggregate("train")
 def train(
-    cfg: DictConfig, trainer: Trainer, task: tasks.FairseqTask, epoch_itr
+    cfg: DictConfig, trainer: Trainer, task: tasks.FairseqTask, epoch_itr, profile_flag
 ) -> Tuple[List[Optional[float]], bool]:
     """Train the model for one epoch and return validation losses."""
     # Initialize data iterator
@@ -335,9 +348,9 @@ def train(
         with metrics.aggregate("train_inner"), torch.autograd.profiler.record_function(
             "train_step-%d" % i
         ):
-            cfg.profile_flag.value = 1
+            if cfg.actnn.ut: profile_flag.value = 1
             log_output = trainer.train_step(samples)
-            cfg.profile_flag.value = 0
+            if cfg.actnn.ut: profile_flag.value = 0
         
         if log_output is not None:  # not OOM, overflow, ...
             # log mid-epoch stats

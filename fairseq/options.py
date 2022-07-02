@@ -420,4 +420,6 @@ def add_actnn_args(parser):
     group =  parser.add_argument_group("ActNN configuration")
     group.add_argument('--alg', default=None, type=str)
     group.add_argument('--exp', default=None, type=int)
+    group.add_argument('--ut', default=False, type=bool)
+    group.add_argument('--utpath', default="utilization.log", type=str)
     gen_parser_from_dataclass(group, ActNNConfig())
