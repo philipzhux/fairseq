@@ -375,7 +375,7 @@ def train(
     logger.info("end of epoch {} (average epoch stats below)".format(epoch_itr.epoch))
     stats = get_training_stats(metrics.get_smoothed_values("train"))
     progress.print(stats, tag="train", step=num_updates)
-    bz_exp = cfg.dataset.max_tokens//cfg.model.tokens_per_sample
+    bz_exp = cfg.dataset.max_tokens//cfg.model.tokens_per_sample*cfg.distributed_training.distributed_world_size
     # bz = metrics.get_smoothed_value("train","bsz")
     pm = metrics.get_smoothed_value("train","peak_mem")*cfg.distributed_training.distributed_world_size
     ips = wps/cfg.model.tokens_per_sample
