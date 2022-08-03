@@ -14,8 +14,7 @@ import os
 import sys
 import time
 from typing import Any, Callable, Dict, List, Optional, Tuple
-import actnn
-from actnn.utils import get_memory_usage, compute_tensor_bytes, exp_recorder
+from gact.utils import get_memory_usage, compute_tensor_bytes, exp_recorder
 from multiprocessing import Process, Value
 # We need to setup root logger before importing any fairseq libraries.
 logging.basicConfig(

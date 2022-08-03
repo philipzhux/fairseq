@@ -31,7 +31,7 @@ from fairseq.models.ema import build_ema
 from fairseq.nan_detector import NanDetector
 from fairseq.optim import lr_scheduler
 from fairseq.utils import safe_hasattr
-import actnn
+import gact
 import numpy as np
 
 logger = logging.getLogger(__name__)
@@ -791,9 +791,9 @@ class Trainer(object):
         self.criterion.train()
         self.zero_grad()
         if self.cfg.actnn.alg in ["L1", "swap"]:
-            print("===========Register ActNN===========")
-            actnn.set_optimization_level(self.cfg.actnn.alg)
-            controller = actnn.controller.Controller(self.model)
+            # print("===========Register ActNN===========")
+            gact.set_optimization_level(self.cfg.actnn.alg)
+            controller = gact.controller.Controller(self.model)
 
             def pack_hook(input):
                 return controller.quantize(input)
@@ -803,7 +803,9 @@ class Trainer(object):
             try:
                 torch._C._autograd._register_saved_tensors_default_hooks(
                     pack_hook, unpack_hook)
-            except Exception as e: print("[Warning] Repeated hook register: ",e)    
+            except Exception as e: 
+                pass
+                #print("[Warning] Repeated hook register: ",e)    
             
 
         
